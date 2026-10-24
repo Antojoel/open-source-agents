@@ -7,7 +7,7 @@
     "utility_kept_pct": 100.0,
     "restore_pct": 100.0,
     "pii_values": 840,
-    "seconds": 0.2,
+    "seconds": 0.3,
     "ocr_protected_pct": 100.0,
     "ocr_protected_without_guard_pct": 20.0,
     "guard_false_blocks": 0,
@@ -287,7 +287,7 @@
         "over_redacted": 0
       }
     ],
-    "seconds": 0.2
+    "seconds": 0.3
   },
   "guard": {
     "false_blocks": 0,

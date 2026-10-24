@@ -16,7 +16,7 @@ import pandas as pd
 
 from aran import audit, detectors, local_llm, profiles, readers
 from aran.detectors import Finding
-from aran.vault import Vault
+from aran.vault import Vault, open_session
 
 
 @dataclass
@@ -129,9 +129,8 @@ def redact_text(
     kind: str = "text",
 ) -> RedactionResult:
     prof = profiles.load(profile)
-    vault = Vault(session_id)
-    redacted, report, counts = _redact(text, prof, vault, use_llm, kind)
-    vault.save()
+    with open_session(session_id) as vault:
+        redacted, report, counts = _redact(text, prof, vault, use_llm, kind)
     audit.record(session_id=vault.session_id, content=text, kind=kind, profile=prof.name,
                  counts=counts, channel=channel)
     return RedactionResult(vault.session_id, prof.name, kind, redacted, report, counts)
@@ -184,15 +183,14 @@ def redact_document(
 ) -> RedactionResult:
     path = Path(path)
     prof = profiles.load(profile)
-    doc = readers.read(path)
-    vault = Vault(session_id)
-    if doc.kind == "table":
-        content = doc.table.to_csv(index=False)
-        redacted, report, counts = _redact_table(doc.table, prof, vault)
-    else:
-        content = doc.text
-        redacted, report, counts = _redact(doc.text, prof, vault, use_llm, doc.kind)
-    vault.save()
+    doc = readers.read(path)  # slow OCR happens outside the vault lock
+    with open_session(session_id) as vault:
+        if doc.kind == "table":
+            content = doc.table.to_csv(index=False)
+            redacted, report, counts = _redact_table(doc.table, prof, vault)
+        else:
+            content = doc.text
+            redacted, report, counts = _redact(doc.text, prof, vault, use_llm, doc.kind)
     audit.record(session_id=vault.session_id, content=content, kind=doc.kind, profile=prof.name,
                  counts=counts, channel=channel)
     return RedactionResult(vault.session_id, prof.name, doc.kind, redacted, report, counts)

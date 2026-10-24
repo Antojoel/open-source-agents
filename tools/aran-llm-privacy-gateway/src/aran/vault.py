@@ -7,10 +7,13 @@ cloud model can still tell that the PAN on the PAN card and the bank statement m
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import re
 import secrets
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -31,6 +34,28 @@ def new_session_id() -> str:
 
 
 _SESSION_RE = re.compile(r"^s_[0-9a-f]{12}$")
+
+
+@contextmanager
+def open_session(session_id: str | None = None) -> Iterator["Vault"]:
+    """Load, modify and save a session's vault under an exclusive lock.
+
+    Agents call tools in parallel, so several redactions can hit one session at once.
+    Without the lock, the last save wins: tokens are lost, two values can share a token,
+    and the file can be corrupted.
+    """
+    sid = session_id or new_session_id()
+    if not _SESSION_RE.match(sid):
+        raise ValueError(f"Invalid session id: {sid!r}")
+    fd = os.open(_vault_dir() / f"{sid}.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        vault = Vault(sid)
+        yield vault
+        vault.save()
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _normalise(pii_type: str, value: str) -> str:
@@ -70,9 +95,12 @@ class Vault:
 
     def save(self) -> None:
         payload = json.dumps({"tokens": self.tokens, "counters": self._counters}, ensure_ascii=False)
-        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        # Write-then-rename so a concurrent reader (e.g. restore) never sees a half-written file.
+        tmp = self.path.with_suffix(f".{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(payload)
+        os.replace(tmp, self.path)
 
     # Accept the canonical <PERSON_1> plus forms models sometimes emit: [PERSON_1], PERSON_1.
     _TOKEN_RE = re.compile(r"[<\[]?\b([A-Z]+(?:_[A-Z]+)*_\d+)\b[>\]]?")

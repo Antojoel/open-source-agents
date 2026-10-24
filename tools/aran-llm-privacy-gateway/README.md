@@ -299,7 +299,8 @@ What the numbers say:
 
 ```bash
 # Offline unit tests (no Ollama needed): checksums, overlaps, round-trip restore,
-# session consistency, profiles, OCR fail-closed, egress guard, audit has no PII, vault perms
+# session consistency, profiles, OCR fail-closed, egress guard, audit has no PII, vault perms,
+# and parallel redactions in one session (vault locking)
 uv run pytest -q
 
 # Evaluation harness (see above)
@@ -319,13 +320,13 @@ uv run aran scan samples/kyc/* samples/health/* samples/customers.csv
 - **Tokens reveal the type of data** (`<PAN_1>`), and kept fields (amounts, employer, IFSC) are still visible to the cloud model by design. Choose or edit profiles to match your purpose.
 - **Indian identifiers only** for now (plus email, cards and phone numbers). Passport, voter ID and driving licence numbers are only caught by the OCR guard, not by dedicated rules.
 - Handwritten documents and non-Latin scripts (Hindi, Tamil on Aadhaar cards) haven't been evaluated.
-- Tested on macOS; Linux should work, and Windows hasn't been tested.
+- Tested on macOS; Linux should work. **Windows isn't supported** yet, because the vault lock uses `fcntl`.
 
 ---
 
 ## Security & Privacy Considerations
 
-- **Secrets Handling**: Aran needs no API keys. The vault (`~/.aran/vault/*.json`) maps tokens to real values. It is created with `0600` permissions but is **not encrypted**. Treat it like the original documents and delete sessions you no longer need.
+- **Secrets Handling**: Aran needs no API keys. The vault (`~/.aran/vault/*.json`) maps tokens to real values. It is created with `0600` permissions, locked per session so parallel redactions (agents call tools in parallel) can't lose or reuse tokens, and saved atomically, but it is **not encrypted**. Treat it like the original documents and delete sessions you no longer need.
 - **Data Privacy**: all detection, OCR and restoring happen locally (Ollama on `localhost`). The audit log stores only counts, a truncated SHA-256 of each document, and channel names.
 - **Safety**: Aran never runs code from documents. The MCP server only reads files inside `ARAN_DOCS_DIR`, hides filenames, and has no restore tool. If no profile rule applies, data is masked.
 
